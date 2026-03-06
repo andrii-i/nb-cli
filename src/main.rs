@@ -40,6 +40,8 @@ enum NotebookCommands {
     Read(commands::read::ReadArgs),
     /// Execute all cells in a notebook
     Execute(commands::execute_notebook::ExecuteNotebookArgs),
+    /// Search for patterns in notebook cells
+    Search(commands::search::SearchArgs),
 }
 
 #[derive(Subcommand)]
@@ -68,6 +70,7 @@ fn main() {
             NotebookCommands::Create(args) => commands::create_notebook::execute(args),
             NotebookCommands::Read(args) => commands::read::execute(args),
             NotebookCommands::Execute(args) => commands::execute_notebook::execute(args),
+            NotebookCommands::Search(args) => commands::search::execute(args),
         },
         Commands::Cell { command } => match command {
             CellCommands::Add(args) => commands::add_cell::execute(args),
