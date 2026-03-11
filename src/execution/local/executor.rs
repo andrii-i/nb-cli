@@ -98,8 +98,8 @@ fn execute_batch(
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Note: allow non-zero exit if we got valid JSON output (cells can have errors)
-    let results_json: Vec<serde_json::Value> = serde_json::from_str(&stdout)
-        .with_context(|| {
+    let results_json: Vec<serde_json::Value> =
+        serde_json::from_str(&stdout).with_context(|| {
             let stderr = String::from_utf8_lossy(&output.stderr);
             format!(
                 "Failed to parse Python output.\nStdout: {}\nStderr: {}",
