@@ -46,13 +46,42 @@ impl TestEnv {
         dest_path
     }
 
+    /// Copy an entire fixture directory (with subdirectories) to the test environment
+    fn copy_fixture_dir(&self, fixture_subdir: &str, dest_name: &str) -> PathBuf {
+        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join(fixture_subdir);
+        let dest_path = self.notebook_path(dest_name);
+
+        fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+            fs::create_dir_all(dst)?;
+            for entry in fs::read_dir(src)? {
+                let entry = entry?;
+                let ty = entry.file_type()?;
+                let src_path = entry.path();
+                let dst_path = dst.join(entry.file_name());
+                if ty.is_dir() {
+                    copy_dir_recursive(&src_path, &dst_path)?;
+                } else {
+                    fs::copy(&src_path, &dst_path)?;
+                }
+            }
+            Ok(())
+        }
+
+        copy_dir_recursive(&fixture_path, &dest_path)
+            .unwrap_or_else(|_| panic!("Failed to copy fixture directory {}", fixture_subdir));
+        dest_path
+    }
+
     fn run(&self, args: &[&str]) -> CommandResult {
         let output = Command::new(&self.binary_path)
             .args(args)
             .current_dir(self.temp_dir.path())
             .env("PATH", &self.venv_path_env)
             .env("VIRTUAL_ENV", &self.venv_root)
-            .env_remove("PYTHONHOME")  // Remove if set, as it conflicts with venv
+            .env_remove("PYTHONHOME") // Remove if set, as it conflicts with venv
             .output()
             .expect("Failed to execute command");
 
@@ -108,13 +137,7 @@ fn test_execute_single_cell() {
     let nb_path = env.copy_fixture("for_execution.ipynb", "test.ipynb");
 
     let result = env
-        .run(&[
-            "cell",
-            "execute",
-            nb_path.to_str().unwrap(),
-            "--cell",
-            "0",
-        ])
+        .run(&["cell", "execute", nb_path.to_str().unwrap(), "--cell", "0"])
         .assert_success();
 
     assert!(result.contains("executed") || result.contains("success"));
@@ -130,14 +153,8 @@ fn test_execute_cell_with_output() {
     let nb_path = env.copy_fixture("for_execution.ipynb", "test.ipynb");
 
     // Execute cell 0 first (defines x)
-    env.run(&[
-        "cell",
-        "execute",
-        nb_path.to_str().unwrap(),
-        "--cell",
-        "0",
-    ])
-    .assert_success();
+    env.run(&["cell", "execute", nb_path.to_str().unwrap(), "--cell", "0"])
+        .assert_success();
 
     // Verify output was captured
     let result = env
@@ -218,7 +235,9 @@ fn test_execute_entire_notebook() {
         .run(&["notebook", "execute", nb_path.to_str().unwrap()])
         .assert_success();
 
-    assert!(result.contains("executed") || result.contains("Executed") || result.contains("success"));
+    assert!(
+        result.contains("executed") || result.contains("Executed") || result.contains("success")
+    );
 
     // Verify all cells have execution counts
     let read_result = env
@@ -287,13 +306,7 @@ fn test_execute_with_allow_errors() {
 
     // Verify first cell executed successfully
     let read_result = env
-        .run(&[
-            "notebook",
-            "read",
-            nb_path.to_str().unwrap(),
-            "--cell",
-            "0",
-        ])
+        .run(&["notebook", "read", nb_path.to_str().unwrap(), "--cell", "0"])
         .assert_success();
 
     assert!(read_result.stdout.contains("execution_count"));
@@ -472,4 +485,36 @@ fn test_workflow_modify_and_reexecute() {
 
     // Should show Result: 110 instead of Result: 52
     assert!(result.stdout.contains("Result: 110"));
+}
+
+#[test]
+fn test_execute_with_relative_paths() {
+    let Some(env) = TestEnv::new() else {
+        eprintln!("⚠️  Skipping test: execution environment not available");
+        return;
+    };
+
+    // Copy the entire subdir fixture (includes notebook and data/test.txt)
+    let subdir_path = env.copy_fixture_dir("subdir", "subdir");
+    let nb_path = subdir_path.join("with_relative_path.ipynb");
+
+    // Execute notebook from parent directory (not from subdir)
+    // This tests that relative paths in the notebook work correctly
+    env.run(&["notebook", "execute", nb_path.to_str().unwrap()])
+        .assert_success();
+
+    // Verify the file was loaded successfully
+    let result = env
+        .run(&[
+            "notebook",
+            "read",
+            nb_path.to_str().unwrap(),
+            "--cell",
+            "0",
+            "--with-outputs",
+        ])
+        .assert_success();
+
+    // Check that it loaded the file and printed the expected output
+    assert!(result.stdout.contains("Hello from relative path!"));
 }

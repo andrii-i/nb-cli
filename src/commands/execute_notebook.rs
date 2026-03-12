@@ -117,11 +117,26 @@ async fn execute_async(args: ExecuteNotebookArgs) -> Result<()> {
         .as_ref()
         .map(|ks| ks.name.as_str());
 
-    // Extract notebook filename for remote session matching
-    let notebook_filename = std::path::Path::new(&args.file)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(String::from);
+    // Get absolute path to notebook for working directory determination
+    let notebook_path_abs =
+        std::fs::canonicalize(&args.file).context("Failed to resolve notebook path")?;
+    let notebook_path_str = notebook_path_abs
+        .to_str()
+        .context("Notebook path contains invalid UTF-8")?
+        .to_string();
+
+    // For remote mode, extract just the filename for session matching
+    let notebook_identifier =
+        if matches!(mode, crate::execution::types::ExecutionMode::Remote { .. }) {
+            std::path::Path::new(&args.file)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(String::from)
+                .unwrap_or(notebook_path_str.clone())
+        } else {
+            // For local mode, use full absolute path
+            notebook_path_str.clone()
+        };
 
     // Create execution config
     let config = ExecutionConfig {
@@ -129,7 +144,7 @@ async fn execute_async(args: ExecuteNotebookArgs) -> Result<()> {
         timeout: Duration::from_secs(args.timeout),
         kernel_name: args.kernel.or_else(|| notebook_kernel.map(String::from)),
         allow_errors: args.allow_errors,
-        notebook_path: notebook_filename.clone(),
+        notebook_path: Some(notebook_identifier.clone()),
     };
 
     // Create and start backend (reuse kernel for all cells)
@@ -230,7 +245,7 @@ async fn execute_async(args: ExecuteNotebookArgs) -> Result<()> {
             ref token,
         } => {
             // Sync outputs to JupyterLab via Y.js
-            let notebook_path = notebook_filename.context("No notebook filename for Y.js sync")?;
+            let notebook_path = notebook_identifier.clone();
 
             match YDocClient::connect(server_url.clone(), token.clone(), notebook_path).await {
                 Ok(mut ydoc_client) => {

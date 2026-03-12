@@ -10,7 +10,7 @@ import nbformat
 from nbclient import NotebookClient
 
 
-def execute_batch(cells_code, kernel_name='python3', timeout=30):
+def execute_batch(cells_code, kernel_name='python3', timeout=30, cwd=None):
     """
     Execute multiple code snippets in sequence using a single kernel.
 
@@ -18,6 +18,7 @@ def execute_batch(cells_code, kernel_name='python3', timeout=30):
         cells_code: List of code strings to execute
         kernel_name: Kernel to use (default: python3)
         timeout: Timeout in seconds per cell
+        cwd: Working directory for kernel execution (default: None)
 
     Returns:
         list of dicts with execution results for each cell
@@ -33,12 +34,17 @@ def execute_batch(cells_code, kernel_name='python3', timeout=30):
         'language': 'python'
     }
 
-    # Create notebook client
+    # Create notebook client with optional working directory
+    resources = {}
+    if cwd:
+        resources['metadata'] = {'path': cwd}
+
     client = NotebookClient(
         nb,
         timeout=timeout,
         kernel_name=kernel_name,
         allow_errors=True,  # Continue on errors
+        resources=resources if resources else None,
     )
 
     try:
@@ -117,6 +123,10 @@ def main():
         default=30,
         help='Timeout in seconds per cell (default: 30)'
     )
+    parser.add_argument(
+        '--cwd',
+        help='Working directory for kernel execution (default: current directory)'
+    )
 
     args = parser.parse_args()
 
@@ -129,7 +139,7 @@ def main():
         parser.error("Must provide cells as arguments or use --from-json")
 
     # Execute batch
-    results = execute_batch(cells_code, kernel_name=args.kernel, timeout=args.timeout)
+    results = execute_batch(cells_code, kernel_name=args.kernel, timeout=args.timeout, cwd=args.cwd)
 
     # Output as JSON
     print(json.dumps(results, indent=2))

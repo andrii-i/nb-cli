@@ -19,6 +19,8 @@ pub struct LocalExecutor {
     batch_script_path: std::path::PathBuf,
     // Track executed cells to maintain kernel state
     executed_cells: Vec<String>,
+    // Working directory for kernel execution (notebook directory)
+    cwd: Option<std::path::PathBuf>,
 }
 
 // Embed the Python batch script at compile time
@@ -49,11 +51,18 @@ impl LocalExecutor {
             batch_path
         };
 
+        // Extract working directory from config if notebook_path is set
+        let cwd = config
+            .notebook_path
+            .as_ref()
+            .and_then(|path| std::path::Path::new(path).parent().map(|p| p.to_path_buf()));
+
         Ok(Self {
             config,
             kernel_name: String::new(),
             batch_script_path,
             executed_cells: Vec::new(),
+            cwd,
         })
     }
 }
@@ -64,18 +73,27 @@ fn execute_batch(
     cells: &[String],
     kernel_name: &str,
     timeout: std::time::Duration,
+    cwd: Option<&std::path::Path>,
 ) -> Result<Vec<ExecutionResult>> {
     // Create JSON input with all cell codes
     let cells_json = serde_json::to_string(cells).context("Failed to serialize cells")?;
 
     // Execute Python script with JSON input via stdin
-    let mut child = Command::new("python3")
+    let mut command = Command::new("python3");
+    command
         .arg(script_path)
         .arg("--from-json")
         .arg("--kernel")
         .arg(kernel_name)
         .arg("--timeout")
-        .arg(timeout.as_secs().to_string())
+        .arg(timeout.as_secs().to_string());
+
+    // Add working directory if specified
+    if let Some(cwd_path) = cwd {
+        command.arg("--cwd").arg(cwd_path);
+    }
+
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -212,10 +230,17 @@ impl ExecutionBackend for LocalExecutor {
         let batch_script_path = self.batch_script_path.clone();
         let kernel_name = self.kernel_name.clone();
         let timeout = self.config.timeout;
+        let cwd = self.cwd.clone();
 
         // Execute in a blocking task
         let results = tokio::task::spawn_blocking(move || {
-            execute_batch(&batch_script_path, &cells, &kernel_name, timeout)
+            execute_batch(
+                &batch_script_path,
+                &cells,
+                &kernel_name,
+                timeout,
+                cwd.as_deref(),
+            )
         })
         .await
         .context("Task join error")??;
