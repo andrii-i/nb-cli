@@ -28,3 +28,5 @@ target
 .ipynb_checkpoints/
 .jupyter/
 tests/.test-venv
+
+.claude
