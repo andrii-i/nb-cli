@@ -78,11 +78,17 @@ fn list_available_kernels() -> Vec<String> {
 /// Get Jupyter kernel directories
 ///
 /// Checks in priority order:
-/// 1. User kernels: ~/.local/share/jupyter/kernels (Linux/Mac)
-/// 2. System kernels: /usr/local/share/jupyter/kernels, /usr/share/jupyter/kernels
-/// 3. Python site-packages kernels
+/// 1. Virtual environment kernels: $VIRTUAL_ENV/share/jupyter/kernels (if VIRTUAL_ENV is set)
+/// 2. User kernels: ~/.local/share/jupyter/kernels (Linux/Mac)
+/// 3. System kernels: /usr/local/share/jupyter/kernels, /usr/share/jupyter/kernels
+/// 4. Python site-packages kernels
 fn get_kernel_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
+
+    // Virtual environment kernels (if VIRTUAL_ENV is set)
+    if let Ok(venv) = std::env::var("VIRTUAL_ENV") {
+        dirs.push(PathBuf::from(venv).join("share").join("jupyter").join("kernels"));
+    }
 
     // User kernels
     if let Some(data_dir) = dirs::data_local_dir() {

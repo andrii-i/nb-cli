@@ -3,7 +3,8 @@ use crate::execution::types::{ExecutionConfig, ExecutionError, ExecutionResult};
 use crate::execution::ExecutionBackend;
 use anyhow::{Context, Result};
 use jupyter_protocol::{
-    ConnectionInfo, ExecuteRequest, ExecutionState, JupyterMessage, JupyterMessageContent,
+    ConnectionInfo, ExecuteRequest, ExecutionState, JupyterKernelspec, JupyterMessage,
+    JupyterMessageContent,
 };
 use std::path::PathBuf;
 
@@ -203,19 +204,28 @@ impl LocalExecutor {
 impl ExecutionBackend for LocalExecutor {
     async fn start(&mut self) -> Result<()> {
         // Find kernel
-        let (kernel_name, _kernel_spec_path) = find_kernel(
+        let (kernel_name, kernel_spec_path) = find_kernel(
             self.config.kernel_name.as_deref(),
             None, // Notebook kernel will be passed from command
         )?;
         self.kernel_name = kernel_name.clone();
 
-        // Find kernelspec
-        let kernelspecs = runtimelib::list_kernelspecs().await;
-        let kernel_spec = kernelspecs
-            .iter()
-            .find(|k| k.kernel_name == kernel_name)
-            .context(format!("Kernel '{}' not found", kernel_name))?
-            .clone();
+        // Read kernelspec from the found path
+        let kernel_json_path = kernel_spec_path.join("kernel.json");
+        let kernel_json_content = tokio::fs::read_to_string(&kernel_json_path)
+            .await
+            .context(format!(
+                "Failed to read kernel spec from {}",
+                kernel_json_path.display()
+            ))?;
+        let kernelspec: JupyterKernelspec = serde_json::from_str(&kernel_json_content)
+            .context("Failed to parse kernel.json")?;
+
+        let kernel_spec = runtimelib::KernelspecDir {
+            kernel_name: kernel_name.clone(),
+            path: kernel_spec_path,
+            kernelspec,
+        };
 
         self.kernel_spec = Some(kernel_spec.clone());
 
