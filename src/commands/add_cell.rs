@@ -101,7 +101,7 @@ fn parse_multi_cell_source(text: &str) -> Option<Vec<ParsedCell>> {
     // sentinel. This prevents accidental data loss when cell content happens
     // to contain @@code/@@markdown/@@raw as literal text.
     let first_non_empty = lines.iter().find(|line| !line.trim().is_empty());
-    if first_non_empty.map_or(true, |line| parse_sentinel(line).is_none()) {
+    if first_non_empty.is_none_or(|line| parse_sentinel(line).is_none()) {
         return None;
     }
 
@@ -155,9 +155,18 @@ struct SentinelInfo {
 fn parse_sentinel(line: &str) -> Option<SentinelInfo> {
     let trimmed = line.trim();
     match trimmed {
-        "@@code" => Some(SentinelInfo { cell_type: CellType::Code, metadata: None }),
-        "@@markdown" => Some(SentinelInfo { cell_type: CellType::Markdown, metadata: None }),
-        "@@raw" => Some(SentinelInfo { cell_type: CellType::Raw, metadata: None }),
+        "@@code" => Some(SentinelInfo {
+            cell_type: CellType::Code,
+            metadata: None,
+        }),
+        "@@markdown" => Some(SentinelInfo {
+            cell_type: CellType::Markdown,
+            metadata: None,
+        }),
+        "@@raw" => Some(SentinelInfo {
+            cell_type: CellType::Raw,
+            metadata: None,
+        }),
         _ if trimmed.starts_with("@@cell ") => {
             let json_str = trimmed.strip_prefix("@@cell ")?.trim();
             let json: serde_json::Value = serde_json::from_str(json_str).ok()?;
@@ -170,7 +179,10 @@ fn parse_sentinel(line: &str) -> Option<SentinelInfo> {
             let metadata = json
                 .get("metadata")
                 .and_then(|v| serde_json::from_value::<CellMetadata>(v.clone()).ok());
-            Some(SentinelInfo { cell_type, metadata })
+            Some(SentinelInfo {
+                cell_type,
+                metadata,
+            })
         }
         _ => None,
     }
@@ -626,17 +638,15 @@ mod tests {
         );
 
         // Metadata with editable flag
-        let info = parse_sentinel(
-            r#"@@cell {"cell_type": "markdown", "metadata": {"editable": false}}"#,
-        )
-        .unwrap();
+        let info =
+            parse_sentinel(r#"@@cell {"cell_type": "markdown", "metadata": {"editable": false}}"#)
+                .unwrap();
         assert!(matches!(info.cell_type, CellType::Markdown));
         let meta = info.metadata.unwrap();
         assert_eq!(meta.editable, Some(false));
 
         // Empty metadata object — deserialized but all fields are None
-        let info =
-            parse_sentinel(r#"@@cell {"cell_type": "code", "metadata": {}}"#).unwrap();
+        let info = parse_sentinel(r#"@@cell {"cell_type": "code", "metadata": {}}"#).unwrap();
         assert!(info.metadata.is_some());
 
         // Full nb read-style sentinel with metadata

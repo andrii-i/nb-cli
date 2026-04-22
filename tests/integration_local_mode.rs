@@ -1299,7 +1299,9 @@ plain cell"#,
     // Third cell: shorthand sentinel — empty metadata
     let meta2 = &nb_cells[2]["metadata"];
     assert!(meta2.is_object());
-    assert!(meta2.as_object().unwrap().is_empty() || !meta2.as_object().unwrap().contains_key("tags"));
+    assert!(
+        meta2.as_object().unwrap().is_empty() || !meta2.as_object().unwrap().contains_key("tags")
+    );
 }
 
 // ==================== CELL UPDATE TESTS ====================
