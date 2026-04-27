@@ -1,0 +1,32 @@
+[nextest-version]
+required = "0.9.90"
+
+[profile.default]
+# Kill any test that runs longer than 130s (60s × 2 + 10s grace).
+# Directly mitigates the known --timeout bug: stalled kernels die instead of
+# blocking the runner for GitHub Actions' 360-minute default timeout.
+slow-timeout = { period = "60s", terminate-after = 2, grace-period = "10s" }
+# Retry network-dependent subprocess tests with exponential backoff.
+retries = { backoff = "exponential", count = 2, delay = "1s", max-delay = "10s" }
+
+# Serial execution group for live-server tests.
+# Replaces the `-- --test-threads=1` CLI flag with declarative config.
+[test-groups]
+live-server = { max-threads = 1 }
+
+[[profile.default.overrides]]
+# All tests in integration_connect_mode share one Jupyter Server process and
+# must not run concurrently.
+filter = 'binary(integration_connect_mode)'
+test-group = 'live-server'
+slow-timeout = { period = "60s", terminate-after = 3, grace-period = "15s" }
+
+[profile.ci]
+# Do not retry in CI — flakiness should be fixed, not papered over.
+retries = 0
+slow-timeout = { period = "60s", terminate-after = 2, grace-period = "10s" }
+
+[profile.ci.junit]
+path = "junit.xml"
+store-failure-output = true
+store-success-output = false

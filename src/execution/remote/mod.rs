@@ -281,6 +281,7 @@ impl ExecutionBackend for RemoteExecutor {
                     ydoc_result = ydoc.recv_update() => {
                         ydoc_result.context("Y.js update error")?;
                     }
+                    _ = tokio::time::sleep_until(deadline) => { break; }
                 }
             }
         }

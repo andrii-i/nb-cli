@@ -292,16 +292,62 @@ fn test_execute_notebook_with_range() {
 
     let nb_path = env.copy_fixture("for_execution.ipynb", "test.ipynb");
 
-    // Execute only cells 0-1
-    env.run(&[
-        "execute",
-        nb_path.to_str().unwrap(),
-        "--start",
-        "0",
-        "--end",
-        "1",
-    ])
-    .assert_success();
+    // for_execution.ipynb: cell 0=(x=42), cell 1=(y=x+10), cell 2=(print result)
+    // --start 0 --end 1 must execute cells 0 and 1 only; cell 2 must not run.
+    let result = env
+        .run(&[
+            "execute",
+            nb_path.to_str().unwrap(),
+            "--start",
+            "0",
+            "--end",
+            "1",
+            "--json",
+        ])
+        .assert_success();
+
+    let json: serde_json::Value =
+        serde_json::from_str(&result.stdout).expect("--json must produce valid JSON");
+    let code_cells: Vec<_> = json["cells"]
+        .as_array()
+        .expect("cells must be an array")
+        .iter()
+        .filter(|c| c["cell_type"] == "code")
+        .collect();
+    assert_eq!(code_cells.len(), 3, "fixture must have 3 code cells");
+    assert!(
+        code_cells[0]["execution_count"].is_number(),
+        "cell 0 must have executed"
+    );
+    assert!(
+        code_cells[1]["execution_count"].is_number(),
+        "cell 1 must have executed"
+    );
+    assert!(
+        code_cells[2]["execution_count"].is_null(),
+        "cell 2 must NOT have executed (outside range)\nexecution_count: {:?}",
+        code_cells[2]["execution_count"]
+    );
+}
+
+#[test]
+fn test_execute_with_restart_kernel() {
+    let Some(env) = TestEnv::new() else {
+        eprintln!("⚠️  Skipping test: execution environment not available");
+        return;
+    };
+
+    let nb_path = env.copy_fixture("for_execution.ipynb", "test.ipynb");
+
+    let result = env
+        .run(&["execute", nb_path.to_str().unwrap(), "--restart-kernel"])
+        .assert_success();
+
+    assert!(
+        result.stdout.contains("Result: 52"),
+        "--restart-kernel must still produce correct output\nStdout: {}",
+        result.stdout
+    );
 }
 
 #[test]
@@ -489,10 +535,7 @@ fn test_execute_json_format() {
     // Should output valid JSON with cells and summary
     let json: serde_json::Value =
         serde_json::from_str(&result.stdout).expect("Should output valid JSON");
-    assert!(
-        json.get("success").is_some(),
-        "JSON should have success field"
-    );
+    assert_eq!(json["success"], true, "JSON success field must be true");
     assert!(json.get("cells").is_some(), "JSON should have cells array");
 }
 
