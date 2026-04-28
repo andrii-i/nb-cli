@@ -162,16 +162,10 @@ impl TestCtx {
         dest_path
     }
 
-    /// Run `nb` with arbitrary args, automatically appending `--server` and `--token`.
+    /// Run any `nb` command in server_root without implicit args.
     fn run(&self, args: &[&str]) -> CommandResult {
         let output = Command::new(&self.info.binary_path)
             .args(args)
-            .args([
-                "--server",
-                &self.info.server_url,
-                "--token",
-                &self.info.token,
-            ])
             .current_dir(&self.info.server_root)
             .env("PATH", &self.info.venv_path_env)
             .env("VIRTUAL_ENV", &self.info.venv_root)
@@ -184,6 +178,22 @@ impl TestCtx {
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             success: output.status.success(),
         }
+    }
+
+    /// Run a remote `nb` command, automatically appending `--server` and `--token`.
+    fn run_remote(&self, args: &[&str]) -> CommandResult {
+        self.run(
+            &args
+                .iter()
+                .copied()
+                .chain([
+                    "--server",
+                    &self.info.server_url,
+                    "--token",
+                    &self.info.token,
+                ])
+                .collect::<Vec<_>>(),
+        )
     }
 
     /// Run `nb` in `work_dir` WITHOUT auto-appended `--server`/`--token`.
@@ -276,7 +286,7 @@ fn test_execute_without_restart_preserves_state() {
     let nb_str = nb_path.to_str().unwrap();
 
     // First: execute the full notebook to establish kernel state.
-    let result = ctx.run(&["execute", nb_str]).assert_success();
+    let result = ctx.run_remote(&["execute", nb_str]).assert_success();
 
     assert!(
         result.stdout.contains("persistent_var = 999"),
@@ -287,7 +297,7 @@ fn test_execute_without_restart_preserves_state() {
     // Second: execute only cell-use (index 1) — no restart.
     // The kernel should still have `persistent_var` in scope.
     let result = ctx
-        .run(&["execute", nb_str, "--cell-index", "1"])
+        .run_remote(&["execute", nb_str, "--cell-index", "1"])
         .assert_success();
 
     assert!(
@@ -315,7 +325,7 @@ fn test_restart_kernel_clears_state() {
     let nb_str = nb_path.to_str().unwrap();
 
     // Step 1: run the full notebook to create the session and set state.
-    let result = ctx.run(&["execute", nb_str]).assert_success();
+    let result = ctx.run_remote(&["execute", nb_str]).assert_success();
 
     assert!(
         result.stdout.contains("persistent_var = 999"),
@@ -325,7 +335,7 @@ fn test_restart_kernel_clears_state() {
 
     // Step 2: run cell-use without restart — variable should still be in scope.
     let result = ctx
-        .run(&["execute", nb_str, "--cell-index", "1"])
+        .run_remote(&["execute", nb_str, "--cell-index", "1"])
         .assert_success();
 
     assert!(
@@ -337,7 +347,7 @@ fn test_restart_kernel_clears_state() {
     // Step 3: run cell-use *with* restart → NameError because the kernel was restarted
     // and `persistent_var` was never re-defined.
     let result = ctx
-        .run(&[
+        .run_remote(&[
             "execute",
             nb_str,
             "--cell-index",
@@ -372,12 +382,12 @@ fn test_restart_kernel_then_full_notebook_works() {
     let nb_str = nb_path.to_str().unwrap();
 
     // Step 1: initial full execution to create the session.
-    ctx.run(&["execute", nb_str]).assert_success();
+    ctx.run_remote(&["execute", nb_str]).assert_success();
 
     // Step 2: full re-execution with --restart-kernel.
     // All cells are run in order from scratch, so cell-set runs before cell-use.
     let result = ctx
-        .run(&["execute", nb_str, "--restart-kernel"])
+        .run_remote(&["execute", nb_str, "--restart-kernel"])
         .assert_success();
 
     assert!(
@@ -558,7 +568,7 @@ fn test_remote_execute_with_error_fails() {
     };
 
     let nb_path = ctx.copy_fixture("with_error.ipynb", "test_remote_error.ipynb");
-    ctx.run(&["execute", nb_path.to_str().unwrap()])
+    ctx.run_remote(&["execute", nb_path.to_str().unwrap()])
         .assert_failure();
 }
 
@@ -571,7 +581,7 @@ fn test_remote_execute_with_allow_errors() {
     };
 
     let nb_path = ctx.copy_fixture("with_error.ipynb", "test_remote_allow_err.ipynb");
-    ctx.run(&["execute", nb_path.to_str().unwrap(), "--allow-errors"])
+    ctx.run_remote(&["execute", nb_path.to_str().unwrap(), "--allow-errors"])
         .assert_success();
 }
 
@@ -593,7 +603,7 @@ fn test_remote_execute_error_shows_partial_results() {
     );
 
     let result = ctx
-        .run(&["execute", nb_path.to_str().unwrap(), "--json"])
+        .run_remote(&["execute", nb_path.to_str().unwrap(), "--json"])
         .assert_failure();
 
     let json: serde_json::Value = serde_json::from_str(&result.stdout)
@@ -644,7 +654,7 @@ fn test_remote_execute_json_includes_outputs() {
 
     let nb_path = ctx.copy_fixture("for_execution.ipynb", "test_remote_json_out.ipynb");
     let result = ctx
-        .run(&["execute", nb_path.to_str().unwrap(), "--json"])
+        .run_remote(&["execute", nb_path.to_str().unwrap(), "--json"])
         .assert_success();
 
     let json: serde_json::Value =
@@ -776,7 +786,7 @@ fn test_remote_execute_cell_by_id() {
 
     // cell-1 in for_execution.ipynb is `x = 42` — no dependencies, safe to run alone.
     let nb_path = ctx.copy_fixture("for_execution.ipynb", "test_remote_cell_by_id.ipynb");
-    ctx.run(&["execute", nb_path.to_str().unwrap(), "--cell", "cell-1"])
+    ctx.run_remote(&["execute", nb_path.to_str().unwrap(), "--cell", "cell-1"])
         .assert_success();
 }
 
@@ -800,7 +810,7 @@ fn test_remote_execute_cell_range() {
         "test_remote_range.ipynb",
     );
     let result = ctx
-        .run(&[
+        .run_remote(&[
             "execute",
             nb_path.to_str().unwrap(),
             "--start",
@@ -866,10 +876,11 @@ fn test_remote_execute_output_matches_read() {
     let nb_path = ctx.copy_fixture("for_execution.ipynb", "test_remote_read_back.ipynb");
 
     // Execute the full notebook.
-    ctx.run(&["execute", nb_path.to_str().unwrap()])
+    ctx.run_remote(&["execute", nb_path.to_str().unwrap()])
         .assert_success();
 
     // Read cell index 2 (the print cell) and verify the output was written back.
+    // nb read is a local command — use run() (no --server/--token) not run_remote().
     let read_result = ctx
         .run(&[
             "read",
@@ -913,12 +924,12 @@ fn test_remote_execute_negative_cell_index() {
     let nb_path = ctx.copy_fixture("for_execution.ipynb", "test_remote_neg_idx.ipynb");
 
     // Execute the full notebook first to set kernel state (x, y in scope).
-    ctx.run(&["execute", nb_path.to_str().unwrap()])
+    ctx.run_remote(&["execute", nb_path.to_str().unwrap()])
         .assert_success();
 
     // Execute the last cell (index -1: `print(f'Result: {y}')`) — needs x and y in scope.
     let result = ctx
-        .run(&["execute", nb_path.to_str().unwrap(), "--cell-index", "-1"])
+        .run_remote(&["execute", nb_path.to_str().unwrap(), "--cell-index", "-1"])
         .assert_success();
 
     assert!(
@@ -941,15 +952,20 @@ fn test_execute_timeout_interrupts_running_kernel() {
         return;
     };
 
+    // for_connect_timeout.ipynb contains a single `time.sleep(60)` cell.
+    // With --timeout 2, the CLI must interrupt the kernel and return within a few seconds.
     let nb_path = ctx.copy_fixture("for_connect_timeout.ipynb", "test_timeout.ipynb");
 
     let start = std::time::Instant::now();
-    let _result = ctx.run(&["execute", nb_path.to_str().unwrap(), "--timeout", "2"]);
+    let result = ctx.run_remote(&["execute", nb_path.to_str().unwrap(), "--timeout", "2"]);
     let elapsed = start.elapsed();
 
+    // The command must return well before the cell would finish (60s).
     assert!(
         elapsed < std::time::Duration::from_secs(10),
-        "command must exit within timeout; elapsed: {:?}",
+        "command must exit within timeout + grace; elapsed: {:?}",
         elapsed
     );
+    // Partial execution is returned as success (not a hard error).
+    result.assert_success();
 }
