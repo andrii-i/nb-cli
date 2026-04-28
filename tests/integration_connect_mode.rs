@@ -894,10 +894,9 @@ fn test_remote_execute_output_matches_read() {
     let json: serde_json::Value =
         serde_json::from_str(&read_result.stdout).expect("read --json must produce valid JSON");
 
-    let outputs = json["cells"]
+    // nb read --cell-index returns a single cell object, not {"cells": [...]}.
+    let outputs = json["outputs"]
         .as_array()
-        .and_then(|c| c.first())
-        .and_then(|cell| cell["outputs"].as_array())
         .expect("Cell must have outputs array after execution");
 
     assert!(
