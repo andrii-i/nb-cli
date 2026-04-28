@@ -60,7 +60,7 @@ impl JupyterClient {
 
     /// Test connection to the server
     pub async fn test_connection(&self) -> Result<()> {
-        let url = format!("{}/api", self.base_url);
+        let url = format!("{}/api/contents", self.base_url);
         let response = self
             .client
             .get(&url)

@@ -290,7 +290,7 @@ pub fn notebook_path_for_server(file_path: &str, server_root: Option<&str>) -> S
 
     abs.strip_prefix(&root_canon)
         .ok()
-        .and_then(|rel| rel.to_str().map(String::from))
+        .and_then(|rel| rel.to_str().map(|s| s.replace('\\', "/")))
         .unwrap_or_else(|| file_path.to_string())
 }
 
