@@ -4,35 +4,20 @@
 //! read/write code path only. Each test gets its own TempDir so there is no
 //! shared state and tests can run in parallel (default Cargo test runner).
 
+mod test_helpers;
+
 use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
+use test_helpers::CommandResult;
 
 // ==================== TEST HELPERS ====================
 
 struct ConfigTestEnv {
     temp_dir: TempDir,
     binary_path: PathBuf,
-}
-
-struct CommandResult {
-    stdout: String,
-    stderr: String,
-    success: bool,
-}
-
-impl CommandResult {
-    fn assert_success(self) -> Self {
-        if !self.success {
-            panic!(
-                "Command failed:\nStderr: {}\nStdout: {}",
-                self.stderr, self.stdout
-            );
-        }
-        self
-    }
 }
 
 impl ConfigTestEnv {

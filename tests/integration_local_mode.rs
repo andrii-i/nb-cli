@@ -4,6 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
+use test_helpers::CommandResult;
 
 /// Helper struct to manage test environment
 struct TestEnv {
@@ -70,38 +71,6 @@ impl TestEnv {
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             success: output.status.success(),
         }
-    }
-}
-
-struct CommandResult {
-    stdout: String,
-    stderr: String,
-    success: bool,
-}
-
-impl CommandResult {
-    fn assert_success(self) -> Self {
-        if !self.success {
-            panic!(
-                "Command failed:\nStderr: {}\nStdout: {}",
-                self.stderr, self.stdout
-            );
-        }
-        self
-    }
-
-    fn assert_failure(self) -> Self {
-        if self.success {
-            panic!(
-                "Expected command to fail but it succeeded:\nStdout: {}\nStderr: {}",
-                self.stdout, self.stderr
-            );
-        }
-        self
-    }
-
-    fn json_value(&self) -> serde_json::Value {
-        serde_json::from_str(&self.stdout).expect("Failed to parse JSON output")
     }
 }
 

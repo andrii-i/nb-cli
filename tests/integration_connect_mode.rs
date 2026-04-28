@@ -14,6 +14,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
+use test_helpers::CommandResult;
 
 // reqwest is a workspace dependency used for the server health-check poll.
 use reqwest;
@@ -205,31 +206,13 @@ impl TestCtx {
     }
 }
 
-struct CommandResult {
-    stdout: String,
-    stderr: String,
-    success: bool,
-}
-
-impl CommandResult {
-    fn assert_success(self) -> Self {
-        if !self.success {
-            panic!(
-                "Command failed:\nStderr: {}\nStdout: {}",
-                self.stderr, self.stdout
-            );
-        }
-        self
-    }
-
-    fn assert_failure(self) -> Self {
-        if self.success {
-            panic!(
-                "Expected command to fail but it succeeded:\nStdout: {}\nStderr: {}",
-                self.stdout, self.stderr
-            );
-        }
-        self
+/// Jupyter serializes MultilineString as either a plain JSON string or an array of strings.
+/// This helper joins array elements into one string, or returns the string as-is.
+fn join_jupyter_text(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(arr) => arr.iter().filter_map(|v| v.as_str()).collect(),
+        _ => String::new(),
     }
 }
 
@@ -855,10 +838,15 @@ fn test_remote_execute_cell_range() {
     );
 
     // Stream outputs use "text"; execute_result outputs use "data"."text/plain".
-    let text = outputs[0]["text"]
-        .as_str()
-        .or_else(|| outputs[0]["data"]["text/plain"].as_str())
-        .unwrap_or("");
+    // Jupyter serializes MultilineString as a JSON array of strings; handle both.
+    let text = {
+        let t = join_jupyter_text(&outputs[0]["text"]);
+        if !t.is_empty() {
+            t
+        } else {
+            join_jupyter_text(&outputs[0]["data"]["text/plain"])
+        }
+    };
     assert_eq!(
         text.trim(),
         "1",
