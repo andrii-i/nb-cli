@@ -17,9 +17,13 @@ live-server = { max-threads = 1 }
 [[profile.default.overrides]]
 # All tests in integration_connect_mode share one Jupyter Server process and
 # must not run concurrently.
+# retries = 0: these tests are stateful — a failed attempt leaves a session
+# with a broken kernel on the server, and retrying reuses that session causing
+# a 60s hang. Fail fast rather than accumulate bad state.
 filter = 'binary(integration_connect_mode)'
 test-group = 'live-server'
 slow-timeout = { period = "60s", terminate-after = 3, grace-period = "15s" }
+retries = 0
 
 [profile.ci]
 # Do not retry in CI — flakiness should be fixed, not papered over.
