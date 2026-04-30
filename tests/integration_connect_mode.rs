@@ -252,9 +252,7 @@ impl Drop for TestCtx {
             ])
             .output()
         {
-            if let Ok(sessions) =
-                serde_json::from_slice::<Vec<serde_json::Value>>(&output.stdout)
-            {
+            if let Ok(sessions) = serde_json::from_slice::<Vec<serde_json::Value>>(&output.stdout) {
                 for session in &sessions {
                     if let Some(id) = session["id"].as_str() {
                         let _ = Command::new("curl")
@@ -704,7 +702,7 @@ fn test_remote_execute_cell_by_id() {
     let nb_str = nb_path.to_str().unwrap();
 
     let result = ctx
-        .run_remote(&["execute", nb_str, "--cell", "cell-1", "--timeout", "5", "--json"])
+        .run_remote(&["execute", nb_str, "--cell", "cell-1", "--json"])
         .assert_success();
 
     let json: serde_json::Value =
