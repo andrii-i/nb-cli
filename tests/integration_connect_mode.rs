@@ -28,10 +28,6 @@ struct SharedServerInfo {
     venv_root: PathBuf,
 }
 
-// SAFETY: All fields are Send + Sync (Strings and PathBufs).
-unsafe impl Send for SharedServerInfo {}
-unsafe impl Sync for SharedServerInfo {}
-
 /// One shared Jupyter Server for the whole test suite.
 /// Initialized on first access; lives until the test process exits.
 static SHARED_SERVER: OnceLock<Option<SharedServerInfo>> = OnceLock::new();

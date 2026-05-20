@@ -338,12 +338,7 @@ impl ExecutionBackend for RemoteExecutor {
         // If the kernel reported an error via ExecuteReply but Y.js didn't
         // deliver error outputs, use the kernel error directly.
         if let Some(err) = kernel_error {
-            let has_error_output = outputs
-                .iter()
-                .any(|o| matches!(o, nbformat::v4::Output::Error(_)));
-            if !has_error_output {
-                return Ok(ExecutionResult::error(outputs, ec, err));
-            }
+            return Ok(ExecutionResult::error(outputs, ec, err));
         }
 
         Ok(ExecutionResult::success(outputs, ec))
