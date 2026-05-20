@@ -41,7 +41,10 @@ fn any_to_json(any: &yrs::Any) -> serde_json::Value {
                 .collect();
             serde_json::Value::Object(obj)
         }
-        yrs::Any::Buffer(_) => serde_json::Value::Null,
+        yrs::Any::Buffer(_) => {
+            eprintln!("Warning: Y.js Buffer type encountered in cell output — converting to null");
+            serde_json::Value::Null
+        }
     }
 }
 
@@ -220,8 +223,11 @@ impl YDocClient {
                         u32::read(&mut decoder).context("Failed to read payload length")?;
 
                     let payload_start = decoder.next;
-                    let payload = &payload_with_length
-                        [payload_start..payload_start + payload_length as usize];
+                    let payload_end = payload_start + payload_length as usize;
+                    if payload_end > payload_with_length.len() {
+                        continue;
+                    }
+                    let payload = &payload_with_length[payload_start..payload_end];
 
                     match sync_msg_type {
                         0 => {
@@ -509,9 +515,16 @@ pub(crate) fn read_cell_outputs_from_doc(doc: &Doc, cell_index: usize) -> Result
                         .and_then(|u| u.as_str())
                     {
                         urls.push((i as usize, url.to_string()));
-                    } else if let Ok(output) = serde_json::from_value::<nbformat::v4::Output>(json)
+                    } else if let Ok(output) =
+                        serde_json::from_value::<nbformat::v4::Output>(json.clone())
                     {
                         inline.push((i as usize, output));
+                    } else {
+                        eprintln!(
+                            "Warning: cell output [{}] could not be parsed as nbformat Output: {}",
+                            i,
+                            serde_json::to_string(&json).unwrap_or_default()
+                        );
                     }
                 }
             }

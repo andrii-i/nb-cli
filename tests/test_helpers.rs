@@ -101,6 +101,45 @@ pub fn parse_notebook_header(output: &str) -> Option<Sentinel> {
         .find(|s| s.kind == "notebook")
 }
 
+// ==================== FIXTURE HELPERS ====================
+
+/// Copy a fixture file from tests/fixtures/ to a destination path.
+pub fn copy_fixture(fixture_name: &str, dest_path: &std::path::Path) {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join(fixture_name);
+    std::fs::copy(&fixture_path, dest_path)
+        .unwrap_or_else(|_| panic!("Failed to copy fixture {}", fixture_name));
+}
+
+/// Copy an entire fixture directory (recursively) to a destination path.
+pub fn copy_fixture_dir(fixture_subdir: &str, dest_path: &std::path::Path) {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join(fixture_subdir);
+
+    fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(dst)?;
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            let ty = entry.file_type()?;
+            let src_path = entry.path();
+            let dst_path = dst.join(entry.file_name());
+            if ty.is_dir() {
+                copy_dir_recursive(&src_path, &dst_path)?;
+            } else {
+                std::fs::copy(&src_path, &dst_path)?;
+            }
+        }
+        Ok(())
+    }
+
+    copy_dir_recursive(&fixture_path, dest_path)
+        .unwrap_or_else(|_| panic!("Failed to copy fixture directory {}", fixture_subdir));
+}
+
 // ==================== VENV HELPERS ====================
 
 static VENV_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();

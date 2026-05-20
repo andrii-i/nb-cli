@@ -2,7 +2,6 @@
 
 pub mod client;
 pub mod output_conversion;
-pub mod session_check;
 pub mod websocket;
 pub mod ydoc;
 pub mod ydoc_notebook_ops;
@@ -41,6 +40,29 @@ impl RemoteExecutor {
             ydoc: None,
             created_session: false,
         })
+    }
+
+    /// Poll the kernel until it reaches idle state, with exponential backoff.
+    async fn wait_for_kernel_idle(
+        client: &JupyterClient,
+        kernel_id: &str,
+        initial_ms: u64,
+        max_ms: u64,
+        timeout_msg: &str,
+    ) -> Result<()> {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut poll_ms = initial_ms;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(poll_ms)).await;
+            let info = client.get_kernel(kernel_id).await?;
+            if info.execution_state == "idle" {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() > deadline {
+                anyhow::bail!("{}", timeout_msg);
+            }
+            poll_ms = (poll_ms * 2).min(max_ms);
+        }
     }
 
     /// Fetch a single externalized output from the outputs REST API.
@@ -104,22 +126,14 @@ impl ExecutionBackend for RemoteExecutor {
                         .restart_kernel(&existing.kernel.id)
                         .await
                         .context("Failed to restart kernel")?;
-                    // Wait for kernel to be ready using short-interval polling with backoff
-                    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
-                    let mut poll_ms = 200u64;
-                    loop {
-                        tokio::time::sleep(std::time::Duration::from_millis(poll_ms)).await;
-                        let info = client.get_kernel(&existing.kernel.id).await?;
-                        if info.execution_state == "idle" {
-                            break;
-                        }
-                        if tokio::time::Instant::now() > deadline {
-                            anyhow::bail!(
-                                "Timeout waiting for kernel to become ready after restart"
-                            );
-                        }
-                        poll_ms = (poll_ms * 2).min(5_000);
-                    }
+                    Self::wait_for_kernel_idle(
+                        &client,
+                        &existing.kernel.id,
+                        200,
+                        5_000,
+                        "Timeout waiting for kernel to become ready after restart",
+                    )
+                    .await?;
                 }
                 // Return the existing session directly - no new session/kernel creation
                 (existing.clone(), false)
@@ -146,19 +160,14 @@ impl ExecutionBackend for RemoteExecutor {
         // Wait for newly-created kernel to reach idle state before sending
         // execute requests.  Reused sessions already have an idle kernel.
         if created {
-            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
-            let mut poll_ms = 100u64;
-            loop {
-                tokio::time::sleep(std::time::Duration::from_millis(poll_ms)).await;
-                let info = client.get_kernel(&session.kernel.id).await?;
-                if info.execution_state == "idle" {
-                    break;
-                }
-                if tokio::time::Instant::now() > deadline {
-                    anyhow::bail!("Timeout waiting for new kernel to become ready");
-                }
-                poll_ms = (poll_ms * 2).min(2_000);
-            }
+            Self::wait_for_kernel_idle(
+                &client,
+                &session.kernel.id,
+                100,
+                2_000,
+                "Timeout waiting for new kernel to become ready",
+            )
+            .await?;
         }
 
         // Connect to kernel via WebSocket with session_id
@@ -359,5 +368,123 @@ impl ExecutionBackend for RemoteExecutor {
         // stay alive across multiple cell executions.
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpListener;
+
+    fn stream_output_json() -> String {
+        serde_json::json!({
+            "output_type": "stream",
+            "name": "stdout",
+            "text": "hello\n"
+        })
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn fetch_output_returns_on_success() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let _ = tokio::io::AsyncReadExt::read(&mut sock, &mut buf).await;
+            let body = stream_output_json();
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            sock.write_all(resp.as_bytes()).await.unwrap();
+        });
+
+        let http = reqwest::Client::new();
+        let result = RemoteExecutor::fetch_output(
+            &http,
+            &format!("http://127.0.0.1:{}", port),
+            "tok",
+            "/api/outputs/123",
+        )
+        .await;
+
+        assert!(result.is_some(), "expected output from mock server");
+    }
+
+    #[tokio::test]
+    async fn fetch_output_returns_none_on_timeout() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        // Accept but never respond — the 3s deadline should expire
+        tokio::spawn(async move {
+            let (_sock, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        });
+
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(1))
+            .build()
+            .unwrap();
+        let start = std::time::Instant::now();
+        let result = RemoteExecutor::fetch_output(
+            &http,
+            &format!("http://127.0.0.1:{}", port),
+            "tok",
+            "/api/outputs/123",
+        )
+        .await;
+        let elapsed = start.elapsed();
+
+        assert!(result.is_none(), "expected None after timeout");
+        assert!(
+            elapsed.as_secs() <= 5,
+            "should give up within 5s, took {:?}",
+            elapsed
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_output_retries_then_succeeds() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            // First request: return 404
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let _ = tokio::io::AsyncReadExt::read(&mut sock, &mut buf).await;
+            let resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+            sock.write_all(resp.as_bytes()).await.unwrap();
+            drop(sock);
+
+            // Second request: return valid output
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let _ = tokio::io::AsyncReadExt::read(&mut sock, &mut buf).await;
+            let body = stream_output_json();
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            sock.write_all(resp.as_bytes()).await.unwrap();
+        });
+
+        let http = reqwest::Client::new();
+        let result = RemoteExecutor::fetch_output(
+            &http,
+            &format!("http://127.0.0.1:{}", port),
+            "tok",
+            "/api/outputs/123",
+        )
+        .await;
+
+        assert!(result.is_some(), "should succeed after retry");
     }
 }

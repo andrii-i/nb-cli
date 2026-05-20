@@ -35,44 +35,15 @@ impl TestEnv {
         self.temp_dir.path().join(name)
     }
 
-    /// Copy a fixture notebook to the test environment
     fn copy_fixture(&self, fixture_name: &str, dest_name: &str) -> PathBuf {
-        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests")
-            .join("fixtures")
-            .join(fixture_name);
         let dest_path = self.notebook_path(dest_name);
-        fs::copy(&fixture_path, &dest_path)
-            .unwrap_or_else(|_| panic!("Failed to copy fixture {}", fixture_name));
+        test_helpers::copy_fixture(fixture_name, &dest_path);
         dest_path
     }
 
-    /// Copy an entire fixture directory (with subdirectories) to the test environment
     fn copy_fixture_dir(&self, fixture_subdir: &str, dest_name: &str) -> PathBuf {
-        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests")
-            .join("fixtures")
-            .join(fixture_subdir);
         let dest_path = self.notebook_path(dest_name);
-
-        fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
-            fs::create_dir_all(dst)?;
-            for entry in fs::read_dir(src)? {
-                let entry = entry?;
-                let ty = entry.file_type()?;
-                let src_path = entry.path();
-                let dst_path = dst.join(entry.file_name());
-                if ty.is_dir() {
-                    copy_dir_recursive(&src_path, &dst_path)?;
-                } else {
-                    fs::copy(&src_path, &dst_path)?;
-                }
-            }
-            Ok(())
-        }
-
-        copy_dir_recursive(&fixture_path, &dest_path)
-            .unwrap_or_else(|_| panic!("Failed to copy fixture directory {}", fixture_subdir));
+        test_helpers::copy_fixture_dir(fixture_subdir, &dest_path);
         dest_path
     }
 

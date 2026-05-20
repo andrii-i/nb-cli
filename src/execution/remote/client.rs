@@ -44,6 +44,11 @@ struct KernelSpec {
     name: String,
 }
 
+#[derive(Debug, Serialize)]
+struct StartKernelRequest {
+    name: String,
+}
+
 impl JupyterClient {
     /// Create a new Jupyter Server client
     pub fn new(server_url: String, token: String) -> Result<Self> {
@@ -128,9 +133,9 @@ impl JupyterClient {
     #[allow(dead_code)]
     pub async fn start_kernel(&self, kernel_name: &str) -> Result<KernelInfo> {
         let url = format!("{}/api/kernels", self.base_url);
-        let payload = serde_json::json!({
-            "name": kernel_name
-        });
+        let payload = StartKernelRequest {
+            name: kernel_name.to_string(),
+        };
 
         let response = self
             .client
