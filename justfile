@@ -33,7 +33,7 @@ setup:
 # Starts a Jupyter server before nextest so the server is ready before
 # any test process spawns (avoids the port-contention race).
 # Run `just setup` first if tests/.test-venv doesn't exist.
-test:
+test *NEXTEST_ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
     VENV="$(pwd)/tests/.test-venv"
@@ -59,14 +59,13 @@ test:
     NB_TEST_SERVER_URL="http://127.0.0.1:$PORT" \
     NB_TEST_SERVER_TOKEN="nbtest123" \
     NB_TEST_SERVER_ROOT="$SERVER_ROOT" \
-        cargo nextest run
+        cargo nextest run {{ NEXTEST_ARGS }}
 
 # Setup then run the full test suite in one shot
 test-all: setup test
 
 # Run tests with CI profile (no retries, JUnit XML output)
-test-ci:
-    cargo nextest run --profile ci
+test-ci: (test "--profile" "ci")
 
 # Format code
 fmt:

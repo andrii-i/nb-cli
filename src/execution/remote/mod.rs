@@ -143,6 +143,24 @@ impl ExecutionBackend for RemoteExecutor {
 
         self.created_session = created;
 
+        // Wait for newly-created kernel to reach idle state before sending
+        // execute requests.  Reused sessions already have an idle kernel.
+        if created {
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+            let mut poll_ms = 100u64;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(poll_ms)).await;
+                let info = client.get_kernel(&session.kernel.id).await?;
+                if info.execution_state == "idle" {
+                    break;
+                }
+                if tokio::time::Instant::now() > deadline {
+                    anyhow::bail!("Timeout waiting for new kernel to become ready");
+                }
+                poll_ms = (poll_ms * 2).min(2_000);
+            }
+        }
+
         // Connect to kernel via WebSocket with session_id
         let ws_url = client.get_ws_url(&session.kernel.id, Some(&session.id));
         let ws = KernelWebSocket::connect(&ws_url)
@@ -191,6 +209,7 @@ impl ExecutionBackend for RemoteExecutor {
         let mut seen_indices: HashSet<usize> = HashSet::new();
         let mut idle_received = false;
         let mut expected_ec: Option<i64> = None;
+        let mut kernel_error: Option<ExecutionError> = None;
         let deadline = tokio::time::Instant::now() + self.config.timeout;
         let mut idle_catchup_deadline: Option<tokio::time::Instant> = None;
 
@@ -265,22 +284,39 @@ impl ExecutionBackend for RemoteExecutor {
             } else {
                 tokio::select! {
                     kernel_msg = ws.recv_message() => {
-                        if let Some(msg) = kernel_msg? {
-                            let is_ours = msg.parent_header.as_ref()
-                                .map(|h| h.msg_id == msg_id).unwrap_or(false);
-                            if is_ours {
-                                match &msg.content {
-                                    JupyterMessageContent::ExecuteInput(input) => {
-                                        expected_ec = Some(input.execution_count.0 as i64);
-                                    }
-                                    JupyterMessageContent::Status(status) => {
-                                        if matches!(status.execution_state,
-                                            jupyter_protocol::ExecutionState::Idle) {
-                                            idle_received = true;
+                        match kernel_msg? {
+                            Some(msg) => {
+                                let is_ours = msg.parent_header.as_ref()
+                                    .map(|h| h.msg_id == msg_id).unwrap_or(false);
+                                if is_ours {
+                                    match &msg.content {
+                                        JupyterMessageContent::ExecuteInput(input) => {
+                                            expected_ec = Some(input.execution_count.0 as i64);
                                         }
+                                        JupyterMessageContent::ExecuteReply(reply) => {
+                                            if expected_ec.is_none() {
+                                                expected_ec = Some(reply.execution_count.0 as i64);
+                                            }
+                                            if let Some(ref err) = reply.error {
+                                                kernel_error = Some(ExecutionError {
+                                                    ename: err.ename.clone(),
+                                                    evalue: err.evalue.clone(),
+                                                    traceback: err.traceback.clone(),
+                                                });
+                                            }
+                                        }
+                                        JupyterMessageContent::Status(status) => {
+                                            if matches!(status.execution_state,
+                                                jupyter_protocol::ExecutionState::Idle) {
+                                                idle_received = true;
+                                            }
+                                        }
+                                        _ => {}
                                     }
-                                    _ => {}
                                 }
+                            }
+                            None => {
+                                break;
                             }
                         }
                     }
@@ -292,11 +328,21 @@ impl ExecutionBackend for RemoteExecutor {
             }
         }
 
+        // Fallback: use Y.js execution_count, then kernel's, then None.
         let ec = ydoc
             .read_cell_outputs(cell_idx)
             .ok()
             .and_then(|c| c.execution_count)
             .or(expected_ec);
+
+        // If the kernel reported an error via ExecuteReply but Y.js didn't
+        // deliver error outputs, use the kernel error directly.
+        if let Some(err) = kernel_error {
+            if outputs.is_empty() {
+                return Ok(ExecutionResult::error(outputs, ec, err));
+            }
+        }
+
         Ok(ExecutionResult::success(outputs, ec))
     }
 

@@ -74,12 +74,26 @@ jobs:
     - name: Build
       run: cargo build --verbose
 
+    - name: Start Jupyter Server
+      run: |
+        VENV="$(pwd)/tests/.test-venv"
+        SERVER_ROOT=$(mktemp -d)
+        PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('',0)); p=s.getsockname()[1]; s.close(); print(p)")
+        PATH="$VENV/bin:$PATH" VIRTUAL_ENV="$VENV" \
+          jupyter server \
+            --no-browser \
+            --ServerApp.token=nbtest123 \
+            --ServerApp.root_dir="$SERVER_ROOT" \
+            --port="$PORT" \
+            --ServerApp.open_browser=False \
+            > /dev/null 2>&1 &
+        echo "NB_TEST_SERVER_URL=http://127.0.0.1:$PORT" >> "$GITHUB_ENV"
+        echo "NB_TEST_SERVER_TOKEN=nbtest123" >> "$GITHUB_ENV"
+        echo "NB_TEST_SERVER_ROOT=$SERVER_ROOT" >> "$GITHUB_ENV"
+        until curl -sf "http://127.0.0.1:$PORT/api?token=nbtest123" > /dev/null 2>&1; do sleep 0.2; done
+        echo "Jupyter server ready on port $PORT"
+
     - name: Run all tests
-      # nextest: covers all test binaries in one command.
-      # Serial execution for integration_connect_mode is declared in .config/nextest.toml
-      # (test-groups.live-server), replacing the old -- --test-threads=1 CLI flag.
-      # fail-fast=true (nextest default): first failure stops the run, so the
-      # aaa_server_must_be_available sentinel correctly gates all connect-mode tests.
       run: cargo nextest run --profile ci
 
     - name: Upload test results

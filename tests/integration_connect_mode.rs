@@ -242,6 +242,8 @@ impl TestCtx {
 impl Drop for TestCtx {
     fn drop(&mut self) {
         // Delete all sessions to kill idle kernels and prevent Y.js room accumulation.
+        // After deletion, poll until the session list is empty so the next test
+        // starts with a clean server (avoids kernel-startup races).
         if let Ok(output) = Command::new("curl")
             .args([
                 "-sf",
@@ -266,6 +268,30 @@ impl Drop for TestCtx {
                                 ),
                             ])
                             .output();
+                    }
+                }
+                if !sessions.is_empty() {
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    while Instant::now() < deadline {
+                        std::thread::sleep(Duration::from_millis(200));
+                        if let Ok(out) = Command::new("curl")
+                            .args([
+                                "-sf",
+                                &format!(
+                                    "{}/api/sessions?token={}",
+                                    self.info.server_url, self.info.token
+                                ),
+                            ])
+                            .output()
+                        {
+                            if let Ok(remaining) =
+                                serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout)
+                            {
+                                if remaining.is_empty() {
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
             }
