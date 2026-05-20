@@ -335,8 +335,7 @@ impl ExecutionBackend for RemoteExecutor {
             .and_then(|c| c.execution_count)
             .or(expected_ec);
 
-        // If the kernel reported an error via ExecuteReply but Y.js didn't
-        // deliver error outputs, use the kernel error directly.
+        // If the kernel reported an error via ExecuteReply, always treat it as a failure.
         if let Some(err) = kernel_error {
             return Ok(ExecutionResult::error(outputs, ec, err));
         }
