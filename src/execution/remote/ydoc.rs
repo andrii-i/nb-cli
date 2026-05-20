@@ -194,13 +194,13 @@ impl YDocClient {
         while !received_sync_step2 {
             let msg_result = self.ws.next().await;
 
-            if msg_result.is_none() {
+            let Some(msg_result) = msg_result else {
                 return Err(anyhow::anyhow!(
                     "WebSocket closed during handshake - connection terminated by server"
                 ));
-            }
+            };
 
-            let msg = msg_result.unwrap()?;
+            let msg = msg_result?;
 
             match msg {
                 Message::Binary(data) => {
@@ -225,6 +225,11 @@ impl YDocClient {
                     let payload_start = decoder.next;
                     let payload_end = payload_start + payload_length as usize;
                     if payload_end > payload_with_length.len() {
+                        eprintln!(
+                            "Warning: Y.js sync payload length ({}) exceeds buffer ({}), skipping",
+                            payload_end,
+                            payload_with_length.len()
+                        );
                         continue;
                     }
                     let payload = &payload_with_length[payload_start..payload_end];
@@ -515,16 +520,13 @@ pub(crate) fn read_cell_outputs_from_doc(doc: &Doc, cell_index: usize) -> Result
                         .and_then(|u| u.as_str())
                     {
                         urls.push((i as usize, url.to_string()));
-                    } else if let Ok(output) =
-                        serde_json::from_value::<nbformat::v4::Output>(json.clone())
-                    {
-                        inline.push((i as usize, output));
                     } else {
-                        eprintln!(
-                            "Warning: cell output [{}] could not be parsed as nbformat Output: {}",
-                            i,
-                            serde_json::to_string(&json).unwrap_or_default()
-                        );
+                        match serde_json::from_value::<nbformat::v4::Output>(json) {
+                            Ok(output) => inline.push((i as usize, output)),
+                            Err(e) => {
+                                eprintln!("Warning: cell output [{}] could not be parsed: {}", i, e)
+                            }
+                        }
                     }
                 }
             }

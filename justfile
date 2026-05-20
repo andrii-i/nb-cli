@@ -54,7 +54,14 @@ test *NEXTEST_ARGS:
     SERVER_PID=$!
     trap "kill $SERVER_PID 2>/dev/null; rm -rf '$SERVER_ROOT' 2>/dev/null || true" EXIT
     echo "⏳  Waiting for Jupyter server on port $PORT..."
-    until curl -sf "http://127.0.0.1:$PORT/api?token=nbtest123" > /dev/null 2>&1; do sleep 0.2; done
+    SERVER_READY=false
+    for i in $(seq 1 150); do
+      curl -sf "http://127.0.0.1:$PORT/api?token=nbtest123" > /dev/null 2>&1 && SERVER_READY=true && break
+      sleep 0.2
+    done
+    if [ "$SERVER_READY" != "true" ]; then
+      echo "❌  Jupyter server failed to start on port $PORT"; exit 1
+    fi
     echo "✅  Server ready."
     NB_TEST_SERVER_URL="http://127.0.0.1:$PORT" \
     NB_TEST_SERVER_TOKEN="nbtest123" \
