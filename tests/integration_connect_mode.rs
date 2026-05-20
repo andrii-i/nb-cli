@@ -272,6 +272,7 @@ impl Drop for TestCtx {
                 }
                 if !sessions.is_empty() {
                     let deadline = Instant::now() + Duration::from_secs(5);
+                    let mut cleaned = false;
                     while Instant::now() < deadline {
                         std::thread::sleep(Duration::from_millis(200));
                         if let Ok(out) = Command::new("curl")
@@ -288,10 +289,17 @@ impl Drop for TestCtx {
                                 serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout)
                             {
                                 if remaining.is_empty() {
+                                    cleaned = true;
                                     break;
                                 }
                             }
                         }
+                    }
+                    if !cleaned {
+                        eprintln!(
+                            "⚠️  Session cleanup timed out — {} session(s) may still be shutting down",
+                            sessions.len()
+                        );
                     }
                 }
             }

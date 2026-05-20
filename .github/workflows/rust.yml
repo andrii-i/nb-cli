@@ -90,7 +90,14 @@ jobs:
         echo "NB_TEST_SERVER_URL=http://127.0.0.1:$PORT" >> "$GITHUB_ENV"
         echo "NB_TEST_SERVER_TOKEN=nbtest123" >> "$GITHUB_ENV"
         echo "NB_TEST_SERVER_ROOT=$SERVER_ROOT" >> "$GITHUB_ENV"
-        until curl -sf "http://127.0.0.1:$PORT/api?token=nbtest123" > /dev/null 2>&1; do sleep 0.2; done
+        SERVER_READY=false
+        for i in $(seq 1 150); do
+          curl -sf "http://127.0.0.1:$PORT/api?token=nbtest123" > /dev/null 2>&1 && SERVER_READY=true && break
+          sleep 0.2
+        done
+        if [ "$SERVER_READY" != "true" ]; then
+          echo "::error::Jupyter server failed to start on port $PORT"; exit 1
+        fi
         echo "Jupyter server ready on port $PORT"
 
     - name: Run all tests
